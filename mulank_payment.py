@@ -105,6 +105,29 @@ def _mulank_report(conn, rid: str):
     return rec
 
 
+def _open_order(conn, rzp, rid: str):
+    """The id of an order for this report that can still be paid, or None. This is what stops a second charge:
+    a repeat click, a second tab or a retry after a dropped connection reuses the open order, and Razorpay itself
+    refuses to take payment twice on one order. Raises payment_processing if an order is already PAID at Razorpay
+    (the caller settles it) and order_check_failed if Razorpay cannot be asked: never create a second order unsure."""
+    with conn.cursor() as cur:
+        cur.execute("SELECT razorpay_order_id FROM payments WHERE report_id=%s AND status='created' "
+                    "AND razorpay_order_id IS NOT NULL ORDER BY created_at DESC LIMIT 5", (rid,))
+        ids = [row[0] for row in cur.fetchall()]
+    for oid in ids:
+        try:
+            o = rzp.order.fetch(oid)
+        except Exception as e:
+            logger.error("[mulank] could not check an existing order: %s", e.__class__.__name__)
+            raise MulankPaymentError("order_check_failed", 503)
+        st = (o.get("status") or "")
+        if st == "paid":
+            raise MulankPaymentError("payment_processing", 409)
+        if st in ("created", "attempted") and int(o.get("amount") or 0) == MULANK_PRICE_PAISE and o.get("currency") == MULANK_CURRENCY:
+            return oid
+    return None
+
+
 def create_order(conn, rzp_factory, rid: str, preorder=None) -> dict:
     """Server-side order for a Mulank report. Price is the constant above; the client
     supplies nothing but the report id. Refuses ineligible pairs BEFORE any Razorpay call.
@@ -131,7 +154,14 @@ def create_order(conn, rzp_factory, rid: str, preorder=None) -> dict:
     uid = urec.get("user_id") if urec else None
     if not uid:
         raise MulankPaymentError("contact_required", 400)
-    order = rzp_factory().order.create({
+    rzp = rzp_factory()
+    open_id = _open_order(conn, rzp, rid)
+    if open_id:                                            # reuse: one report, one payable order
+        if preorder:
+            mulank_preorder.record(conn, rid, preorder)
+            conn.commit()
+        return {"razorpay_order_id": open_id, "amount": MULANK_PRICE_PAISE, "currency": MULANK_CURRENCY}
+    order = rzp.order.create({
         "amount": MULANK_PRICE_PAISE, "currency": MULANK_CURRENCY, "receipt": rid,
         "notes": {"report_id": rid, "product": PRODUCT, "preorder": "1" if preorder else "0",
                   "content_version": ready["content_version"]}})

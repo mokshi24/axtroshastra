@@ -123,7 +123,7 @@ def render_viewer(doc_html: str, rid: str, eligible: bool, preorder: bool = Fals
           .replace("closest('[data-action=\"checkout\"]')", "closest('[data-action=\"checkout\"],[data-action=\"preorder\"]')")
           .replace("description:'Complete numerology report'", "description:(PRE?'Pre-order: complete numerology report':'Complete numerology report')")
           .replace("if(r.status===409){ busy(false); hideBuy(); say('The complete report is not available for your numbers yet. Your free preview stays on this page.'); return; }",
-                   "if(r.status===409&&code==='use_order'){ busy(false); say('Your report can now be bought directly. Please refresh this page.'); return; }\n      if(r.status===409){ busy(false); hideBuy(); say(PRE?'Pre-orders are not open for your numbers right now. Your free preview stays on this page.':'The complete report is not available for your numbers yet. Your free preview stays on this page.'); return; }"))
+                   "if(r.status===409&&code==='payment_processing'){ busy(false); say('We are confirming a payment for this report. Please wait a minute and refresh this page. Please do not pay again.'); return; }\n      if(r.status===409&&code==='use_order'){ busy(false); say('Your report can now be bought directly. Please refresh this page.'); return; }\n      if(r.status===409){ busy(false); hideBuy(); say(PRE?'Pre-orders are not open for your numbers right now. Your free preview stays on this page.':'The complete report is not available for your numbers yet. Your free preview stays on this page.'); return; }"))
     js = js.replace("__RID__", json.dumps(rid).replace("</", "<\\/"))
     if eligible or preorder:
         js = js.replace("/*CHECKOUT_START*/", "").replace("/*CHECKOUT_END*/", "")

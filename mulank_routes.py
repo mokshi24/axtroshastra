@@ -45,6 +45,19 @@ class MulankOrderIn(BaseModel):
     report_id: str | None = None        # nothing else is read: price comes from the server
 
 
+def _settle_in_flight(api, rid: str) -> bool:
+    """A payment for this report is already captured at Razorpay but not yet recorded here: record it now (same
+    verification as always) instead of letting the customer pay again. True once the report is paid."""
+    try:
+        res = mulank_recovery.recover(api.rzp_client(), limit=5, rid=rid)
+    except Exception:
+        return False
+    for paid_rid in res["paid"]:
+        FULFIL(paid_rid, None)
+    rec = _load(rid)
+    return bool(rec and rec["paid"])
+
+
 def _http(e: mp.MulankPaymentError):
     return HTTPException(e.http, e.code)
 
@@ -61,6 +74,8 @@ def mulank_order(body: MulankOrderIn):
             return out
         except mp.MulankPaymentError as e:
             conn.rollback()
+            if e.code == "payment_processing" and _settle_in_flight(api, body.report_id or ""):
+                return {"already_paid": True}
             raise _http(e)
     finally:
         conn.close()
@@ -427,6 +442,8 @@ def mulank_preorder_order(body: MulankOrderIn, request: Request):
             return out
         except mp.MulankPaymentError as e:
             conn.rollback()
+            if e.code == "payment_processing" and _settle_in_flight(api, body.report_id or ""):
+                return {"already_paid": True}
             raise _http(e)
     finally:
         conn.close()
